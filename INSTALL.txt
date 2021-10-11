@@ -3,10 +3,10 @@ To build your own version from this downloaded copy, make
 sure that you have the Python development source installed first!
 
 On Raspbian:
-$ sudo apt-get install python-dev python3-dev
+$ sudo apt install python3-dev
 
 To install the module:
 
-$ sudo python setup.py install
-  or
 $ sudo python3 setup.py install
+
+NOTE Do not attempt to run from the install directory

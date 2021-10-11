@@ -25,7 +25,6 @@ SOFTWARE.
 #include <time.h>
 #include "c_gpio.h"
 #include "soft_pwm.h"
-pthread_t threads;
 
 struct pwm
 {
@@ -193,6 +192,7 @@ void pwm_set_frequency(unsigned int gpio, float freq)
 
 void pwm_start(unsigned int gpio)
 {
+    pthread_t threads;
     struct pwm *p;
 
     if (((p = find_pwm(gpio)) == NULL) || p->running)

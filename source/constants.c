@@ -25,6 +25,28 @@ SOFTWARE.
 #include "common.h"
 #include "c_gpio.h"
 #include "event_gpio.h"
+#include "hard_pwm.h"
+
+PyObject *high;
+PyObject *low;
+PyObject *input;
+PyObject *output;
+PyObject *pwm;
+PyObject *serial;
+PyObject *i2c;
+PyObject *spi;
+PyObject *unknown;
+PyObject *board;
+PyObject *bcm;
+PyObject *pud_off;
+PyObject *pud_up;
+PyObject *pud_down;
+PyObject *rising_edge;
+PyObject *falling_edge;
+PyObject *both_edge;
+PyObject *mode_MS;
+PyObject *mode_Bal;
+
 
 void define_constants(PyObject *module)
 {
@@ -78,4 +100,10 @@ void define_constants(PyObject *module)
 
    both_edge = Py_BuildValue("i", BOTH_EDGE + PY_EVENT_CONST_OFFSET);
    PyModule_AddObject(module, "BOTH", both_edge);
+
+   mode_Bal = Py_BuildValue("i", PWM_MODE_BAL);
+   PyModule_AddObject(module, "PWM_MODE_BAL", mode_Bal);
+
+   mode_MS = Py_BuildValue("i", PWM_MODE_MS);
+   PyModule_AddObject(module, "PWM_MODE_MS", mode_MS);
 }

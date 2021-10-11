@@ -19,6 +19,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
+/*
+Enhanced functionality by Ian Binnie (based RPi.GPIO 0.7.0 by Ben Croston)
+2021-09-02
+*/
 
 #include "Python.h"
 #include "c_gpio.h"
@@ -27,6 +31,7 @@ SOFTWARE.
 #include "cpuinfo.h"
 #include "constants.h"
 #include "common.h"
+#include "hard_pwm.h"
 
 static PyObject *rpi_revision; // deprecated
 static PyObject *board_info;
@@ -69,6 +74,16 @@ static int mmap_gpio_mem(void)
       return 0;
    }
 }
+
+static int check_dev_mem(void) {
+  // check /dev/mem
+  if (usingGpioMem) {
+    PyErr_SetString(PyExc_RuntimeError, "No access to /dev/mem.  Try running as root!");
+    return 2;
+  }
+  return 0;
+}
+
 
 // python function cleanup(channel=None)
 static PyObject *py_cleanup(PyObject *self, PyObject *args, PyObject *kwargs)
@@ -1018,6 +1033,222 @@ static PyObject *py_setwarnings(PyObject *self, PyObject *args)
    Py_RETURN_NONE;
 }
 
+
+// --------------------------------------------------------------------------------------
+// python function get_PAD(group)
+static PyObject *py_get_PAD(PyObject *self, PyObject *args) {
+  unsigned int group;
+  int padstate, slew, hyst, drive;
+
+  PyObject *value;
+
+  if (!PyArg_ParseTuple(args, "i", &group))
+    return NULL;
+
+  if (get_gpio_number(group, &group))
+    return NULL;
+
+	if (mmap_gpio_mem())
+		return NULL;
+
+  if (check_dev_mem())
+    return NULL;
+
+  padstate = getPAD(group);
+  slew = (padstate >> 4) & 1;
+  hyst = (padstate >> 3) & 1;
+  drive = padstate & 7;
+
+  value = Py_BuildValue("iii", slew, hyst, drive);
+  return value;
+}
+
+// python function set_drive(group, value)
+static PyObject *py_set_drive(PyObject *self, PyObject *args, PyObject *kwargs) {
+  unsigned int group;
+  unsigned int value;
+  int padstate, slew, hyst, drive;
+
+   char *kwlist[] = {"group", "value", NULL};
+   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "ii|Oi", kwlist, &group, &value))
+      return NULL;
+  if (get_gpio_number(group, &group))
+    return NULL;
+  if (get_gpio_number(value, &value))
+    return NULL;
+
+	if (mmap_gpio_mem())
+		return NULL;
+
+  if (check_dev_mem())
+    return NULL;
+
+  padstate = getPAD(group);
+  slew = (padstate >> 4) & 1;
+  hyst = (padstate >> 3) & 1;
+  drive = value & 7;
+  padstate = slew << 4 | hyst << 3 | drive;
+	setPAD(group, padstate);
+	Py_RETURN_NONE;
+}
+
+// python function set_hysteresis(group, value)
+static PyObject *py_set_hysteresis(PyObject *self, PyObject *args, PyObject *kwargs) {
+  unsigned int group;
+  unsigned int value;
+  int padstate, slew, hyst, drive;
+
+   char *kwlist[] = {"group", "value", NULL};
+   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "ii|Oi", kwlist, &group, &value))
+      return NULL;
+  if (get_gpio_number(group, &group))
+    return NULL;
+  if (get_gpio_number(value, &value))
+    return NULL;
+
+	if (mmap_gpio_mem())
+		return NULL;
+
+  if (check_dev_mem())
+    return NULL;
+
+  padstate = getPAD(group);
+  slew = (padstate >> 4) & 1;
+  hyst = value & 1;
+  drive = padstate & 7;
+  padstate = slew << 4 | hyst << 3 | drive;
+	setPAD(group, padstate);
+	Py_RETURN_NONE;
+}
+
+// python function set_slew(group, value)
+static PyObject *py_set_slew(PyObject *self, PyObject *args, PyObject *kwargs) {
+  unsigned int group;
+  unsigned int value;
+  int padstate, slew, hyst, drive;
+
+   char *kwlist[] = {"group", "value", NULL};
+   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "ii|Oi", kwlist, &group, &value))
+      return NULL;
+  if (get_gpio_number(group, &group))
+    return NULL;
+  if (get_gpio_number(value, &value))
+    return NULL;
+
+	if (mmap_gpio_mem())
+		return NULL;
+
+  if (check_dev_mem())
+    return NULL;
+
+  padstate = getPAD(group);
+  slew = value & 1;
+  hyst = (padstate >> 3) & 1;
+  drive = padstate & 7;
+  padstate = slew << 4 | hyst << 3 | drive;
+	setPAD(group, padstate);
+	Py_RETURN_NONE;
+}
+
+// --------------------------------------------------------------------------------------
+// python function pwmsetmode(mode)
+static PyObject *py_pwmsetmode(PyObject *self, PyObject *args) {
+  unsigned int pwm_mode;
+
+  if (!PyArg_ParseTuple(args, "i", &pwm_mode))
+    return NULL;
+  if (mmap_gpio_mem())
+    return NULL;
+  if (check_dev_mem())
+    return NULL;
+  if (pwm_mode != PWM_MODE_MS && pwm_mode != PWM_MODE_BAL) {
+    PyErr_SetString(PyExc_ValueError,
+                    "An invalid mode was passed to pwmsetmode()");
+    return NULL;
+  }
+
+  pwmSetMode(pwm_mode);
+  Py_RETURN_NONE;
+}
+
+static PyObject *py_pwmSetGpio(PyObject *self, PyObject *args) {
+  unsigned int gpio;
+  unsigned int result;
+
+  if (!PyArg_ParseTuple(args, "i", &gpio))
+    return NULL;
+  if (get_gpio_number(gpio, &gpio))
+    return NULL;
+
+  if (mmap_gpio_mem())
+    return NULL;
+
+  if (check_dev_mem())
+    return NULL;
+
+  result = pwmSetGpio(gpio);
+  if (result) {
+    PyErr_SetString(PyExc_ValueError, "GPIO does not support PWM");
+    return NULL;
+  }
+  Py_RETURN_NONE;
+}
+
+static PyObject *py_pwmSetClock(PyObject *self, PyObject *args) {
+  unsigned int divisor;
+
+  if (!PyArg_ParseTuple(args, "i", &divisor))
+    return NULL;
+  if (mmap_gpio_mem())
+    return NULL;
+  if (check_dev_mem())
+    return NULL;
+  pwmSetClock(divisor);
+  Py_RETURN_NONE;
+}
+
+// python function pwm_setRange(gpio, range)
+static PyObject *py_pwmSetRange(PyObject *self, PyObject *args) {
+  unsigned int gpio, range;
+  unsigned int result;
+  if (!PyArg_ParseTuple(args, "ii", &gpio, &range))
+    return NULL;
+  if (get_gpio_number(gpio, &gpio))
+    return NULL;
+  if (mmap_gpio_mem())
+    return NULL;
+  if (check_dev_mem())
+    return NULL;
+  result = pwmSetRange(gpio, range);
+  if (result) {
+    PyErr_SetString(PyExc_ValueError, "GPIO does not support PWM");
+    return NULL;
+  }
+  pwmWrite(gpio, range / 2);
+  Py_RETURN_NONE;
+}
+
+// python function pwm_Write(gpio, mark)
+static PyObject *py_pwmWrite(PyObject *self, PyObject *args) {
+  unsigned int gpio, value;
+  unsigned int result;
+  if (!PyArg_ParseTuple(args, "ii", &gpio, &value))
+    return NULL;
+  if (get_gpio_number(gpio, &gpio))
+    return NULL;
+  if (mmap_gpio_mem())
+    return NULL;
+  if (check_dev_mem())
+    return NULL;
+  result = pwmWrite(gpio, value);
+  if (result) {
+    PyErr_SetString(PyExc_ValueError, "GPIO does not support PWM");
+    return NULL;
+  }
+  Py_RETURN_NONE;
+}
+
+// --------------------------------------------------------------------------------------
 static const char moduledocstring[] = "GPIO functionality of a Raspberry Pi using Python";
 
 PyMethodDef rpi_gpio_methods[] = {
@@ -1037,8 +1268,27 @@ PyMethodDef rpi_gpio_methods[] = {
    {"get_alt", py_get_alt, METH_VARARGS, "Return the current GPIO mode (0-7)\nchannel - either board pin number or BCM number depending on which mode is set."},
    {"get_pullupdn", (PyCFunction)py_get_pullupdn, METH_VARARGS, "Return the current GPIO pull/up down \nchannel - either board pin number or BCM number depending on which mode is set."},
    {"setwarnings", py_setwarnings, METH_VARARGS, "Enable or disable warning messages"},
+
+   {"get_PAD", (PyCFunction)py_get_PAD, METH_VARARGS, "Return the current PAD settings (slew, hyst, drive)\ngroup - 0-2"},
+   {"set_drive", (PyCFunction)py_set_drive, METH_VARARGS | METH_KEYWORDS, "Set PAD drive\ngroup - 0-2\nvalue - 0-7"},
+   {"set_hysteresis", (PyCFunction)py_set_hysteresis, METH_VARARGS | METH_KEYWORDS, "Set PAD hysteresis; 1 = enabled\ngroup - 0-2\nvalue - 0/1 or False/True"},
+   {"set_slew", (PyCFunction)py_set_slew, METH_VARARGS | METH_KEYWORDS, "Set PAD slew rate; 1 = slew rate not limited\ngroup - 0-2\nvalue - 0/1 or False/True"},
+
+   {"pwm_setmode", (PyCFunction)py_pwmsetmode, METH_VARARGS | METH_KEYWORDS,
+		 "Set native balanced mode PWM_MODE_BAL (1) or standard mark:space mode PWM_MODE_MS (0)\nvalue - 0/1 or PWM_MODE_MS/PWM_MODE_BAL"},
+   {"pwm_setGpio", (PyCFunction)py_pwmSetGpio, METH_VARARGS | METH_KEYWORDS,
+		 "Put gpio pin into PWM mode\nchannel - either board pin number or BCM number depending on which mode is set."},
+   {"pwm_setClock", (PyCFunction)py_pwmSetClock, METH_VARARGS | METH_KEYWORDS,
+		 "Set/Change the PWM clock\nBoth channels share a common clock, which is 19.2 MHz / divisor\ndivisor - 1-4095."},
+   {"pwm_setRange", (PyCFunction)py_pwmSetRange, METH_VARARGS | METH_KEYWORDS,
+   ("Determine Channel 0 or 1 from pin and set the range register in the PWM generator.\n"
+			"In Mark:Space mode the output is HIGH for Mark time slots and LOW for Range-Mark.\n"
+			"The output is thus a fixed frequency; PWM frequency = 19.2 MHz / (divisor * range)\n"
+			"Set initial duty cycle to 50%.")},
+		{"pwm_Write", (PyCFunction)py_pwmWrite, METH_VARARGS | METH_KEYWORDS,
+			"Sets the duty cycle  mark/range\nvalue - 0-RANGE."},
    {NULL, NULL, 0, NULL}
-};
+  };
 
 #if PY_MAJOR_VERSION > 2
 static struct PyModuleDef rpigpiomodule = {
@@ -1113,8 +1363,10 @@ PyMODINIT_FUNC init_GPIO(void)
    Py_INCREF(&PWMType);
    PyModule_AddObject(module, "PWM", (PyObject*)&PWMType);
 
+#if PY_MAJOR_VERSION < 3 || PY_MINOR_VERSION < 7
    if (!PyEval_ThreadsInitialized())
       PyEval_InitThreads();
+#endif
 
    // register exit functions - last declared is called first
    if (Py_AtExit(cleanup) != 0)

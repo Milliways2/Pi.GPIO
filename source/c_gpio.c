@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2012-2019 Ben Croston
+Copyright (c) 2012-2021 Ben Croston
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -19,6 +19,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
+/*
+Enhanced functionality by Ian Binnie (based on RPi.GPIO 0.7.0 by Ben Croston)
+Includes code inspired by pigpio & wiringpi
+2021-10-10
+*/
 
 #include <stdio.h>
 #include <stdint.h>
@@ -27,10 +32,21 @@ SOFTWARE.
 #include <sys/mman.h>
 #include <string.h>
 #include "c_gpio.h"
+#include "cpuinfo.h"
+#include "common.h"
+
 
 #define BCM2708_PERI_BASE_DEFAULT   0x20000000
 #define BCM2709_PERI_BASE_DEFAULT   0x3f000000
+#define BCM2710_PERI_BASE_DEFAULT   0x3f000000
+#define BCM2711_PERI_BASE_DEFAULT   0xfe000000
+
+#define PADS_BASE_OFFSET            0x100000
 #define GPIO_BASE_OFFSET            0x200000
+#define CLOCK_BASE_OFFSET           0x101000
+#define TIMER_OFFSET                0x00B000
+#define PWM_OFFSET                  0x20C000
+
 #define FSEL_OFFSET                 0   // 0x0000
 #define SET_OFFSET                  7   // 0x001c / 4
 #define CLR_OFFSET                  10  // 0x0028 / 4
@@ -50,8 +66,22 @@ SOFTWARE.
 
 #define PAGE_SIZE  (4*1024)
 #define BLOCK_SIZE (4*1024)
+#define PADS_LEN  0x38	// from pigpiod.c
+#define PWM_LEN 0x28 // from pigpiod.c
+#define CLK_LEN 0xA8 // from pigpiod.c
 
-static volatile uint32_t *gpio_map;
+volatile uint32_t *gpio_map;
+int usingGpioMem    = 0 ;
+
+static volatile unsigned int pads_base;
+static volatile unsigned int pwm_base;
+static volatile unsigned int clk_base;
+
+static volatile uint32_t *pads_map = 0;
+volatile uint32_t *pwm_map = 0;
+volatile uint32_t *clk_map = 0;
+
+#define BCM_PASSWORD 0x5A000000
 
 void short_wait(void)
 {
@@ -62,78 +92,85 @@ void short_wait(void)
     }
 }
 
-int setup(void)
-{
-    int mem_fd;
-    uint8_t *gpio_mem;
-    uint32_t peri_base = 0;
-    uint32_t gpio_base;
-    unsigned char buf[4];
-    FILE *fp;
-    char buffer[1024];
-    char hardware[1024];
-    int found = 0;
+/*
+	Since kernel 4.1.7 (2015) character device /dev/gpiomem maps the GPIO register page.
 
-    // try /dev/gpiomem first - this does not require root privs
-    if ((mem_fd = open("/dev/gpiomem", O_RDWR|O_SYNC)) > 0)
-    {
-        if ((gpio_map = (uint32_t *)mmap(NULL, BLOCK_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, mem_fd, 0)) == MAP_FAILED) {
-            return SETUP_MMAP_FAIL;
-        } else {
-            return SETUP_OK;
-        }
-    }
+	/dev/gpiomem allows GPIO access without root to members of the gpio group.
+	This does not provide access the PWM or clock hardware registers.
 
-    // revert to /dev/mem method - requires root
+	The alternative is to use /dev/mem which requires root and determining the address of the GPIO peripheral which varies depending on SoC.
 
-    // determine peri_base
-    if ((fp = fopen("/proc/device-tree/soc/ranges", "rb")) != NULL) {
-        // get peri base from device tree
-        fseek(fp, 4, SEEK_SET);
-        if (fread(buf, 1, sizeof buf, fp) == sizeof buf) {
-            peri_base = buf[0] << 24 | buf[1] << 16 | buf[2] << 8 | buf[3] << 0;
-        }
-        fclose(fp);
-    } else {
-        // guess peri base based on /proc/cpuinfo hardware field
-        if ((fp = fopen("/proc/cpuinfo", "r")) == NULL)
-            return SETUP_CPUINFO_FAIL;
+	This function will use /dev/mem if invoked with root privileges and try /dev/gpiomem if not.
+*/
 
-        while(!feof(fp) && !found && fgets(buffer, sizeof(buffer), fp)) {
-            sscanf(buffer, "Hardware	: %s", hardware);
-            if (strcmp(hardware, "BCM2708") == 0 || strcmp(hardware, "BCM2835") == 0) {
-                // pi 1 hardware
-                peri_base = BCM2708_PERI_BASE_DEFAULT;
-                found = 1;
-            } else if (strcmp(hardware, "BCM2709") == 0 || strcmp(hardware, "BCM2836") == 0) {
-                // pi 2 hardware
-                peri_base = BCM2709_PERI_BASE_DEFAULT;
-                found = 1;
-            }
-        }
-        fclose(fp);
-        if (!found)
-            return SETUP_NOT_RPI_FAIL;
-    }
+int setup(void) {
+  int mem_fd;
+  uint8_t *gpio_mem; //	The base address of the GPIO memory mapped hardware IO
+  uint32_t peri_base = 0;
+  uint32_t gpio_base;
+  char hardware[1024];
 
-    if (!peri_base)
-        return SETUP_NOT_RPI_FAIL;
-    gpio_base = peri_base + GPIO_BASE_OFFSET;
+	usingGpioMem    = 0 ;		// IB 2021-08-27
 
-    // mmap the GPIO memory registers
-    if ((mem_fd = open("/dev/mem", O_RDWR|O_SYNC) ) < 0)
-        return SETUP_DEVMEM_FAIL;
-
-    if ((gpio_mem = malloc(BLOCK_SIZE + (PAGE_SIZE-1))) == NULL)
-        return SETUP_MALLOC_FAIL;
-
-    if ((uint32_t)gpio_mem % PAGE_SIZE)
-        gpio_mem += PAGE_SIZE - ((uint32_t)gpio_mem % PAGE_SIZE);
-
-    if ((gpio_map = (uint32_t *)mmap( (void *)gpio_mem, BLOCK_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_FIXED, mem_fd, gpio_base)) == MAP_FAILED)
+  if ((mem_fd = open("/dev/mem", O_RDWR | O_SYNC | O_CLOEXEC)) < 0) {
+    if ((mem_fd = open("/dev/gpiomem", O_RDWR | O_SYNC | O_CLOEXEC)) > 0) {
+      if ((gpio_map = (uint32_t *)mmap(NULL, BLOCK_SIZE, PROT_READ | PROT_WRITE,
+                                       MAP_SHARED, mem_fd, 0)) == MAP_FAILED) {
         return SETUP_MMAP_FAIL;
+      } else {
+        usingGpioMem = 1;
+        return SETUP_OK;
+      }
+    }
+  }
 
-    return SETUP_OK;
+   // Use board revision already detected
+	get_rpi_info(&rpiinfo);
+
+    if (strcmp(rpiinfo.processor, "BCM2708") == 0 || strcmp(hardware, "BCM2835") == 0) {
+      peri_base = BCM2708_PERI_BASE_DEFAULT;
+    } else if (strcmp(rpiinfo.processor, "BCM2709") == 0 ||
+               strcmp(rpiinfo.processor, "BCM2836") == 0) {
+      peri_base = BCM2709_PERI_BASE_DEFAULT;
+    } else if (strcmp(rpiinfo.processor, "BCM2710") == 0 ||
+               strcmp(rpiinfo.processor, "BCM2837") == 0) {
+      peri_base = BCM2710_PERI_BASE_DEFAULT;
+    } else if (strcmp(rpiinfo.processor, "BCM2711") == 0) {
+      peri_base = BCM2711_PERI_BASE_DEFAULT;
+    }
+
+  if (!peri_base)
+    return SETUP_NOT_RPI_FAIL;
+  gpio_base = peri_base + GPIO_BASE_OFFSET;
+
+  if ((gpio_mem = (uint8_t *)malloc(BLOCK_SIZE + (PAGE_SIZE - 1))) == NULL)
+    return SETUP_MALLOC_FAIL;
+
+  if ((uint32_t)gpio_mem % (uint32_t)PAGE_SIZE)
+    gpio_mem += PAGE_SIZE - (uint32_t)gpio_mem % PAGE_SIZE;
+
+  if ((gpio_map = (uint32_t *)mmap(
+           (void *)gpio_mem, BLOCK_SIZE, PROT_READ | PROT_WRITE,
+           MAP_SHARED | MAP_FIXED, mem_fd, gpio_base)) == MAP_FAILED)
+    return SETUP_MMAP_FAIL;
+
+  pads_base = peri_base + PADS_BASE_OFFSET;
+  pads_map = (uint32_t *)mmap(0, PADS_LEN, PROT_READ | PROT_WRITE | PROT_EXEC,
+                          MAP_SHARED | MAP_LOCKED, mem_fd, pads_base);
+  if (pads_map == MAP_FAILED)	printf("mmap (PADS) failed\n");
+
+	pwm_base = peri_base + PWM_OFFSET;
+	pwm_map = (uint32_t *)mmap(0, PWM_LEN, PROT_READ | PROT_WRITE | PROT_EXEC,
+                               MAP_SHARED | MAP_LOCKED, mem_fd, pwm_base);
+  if (pwm_map == MAP_FAILED)	printf("mmap (PWM) failed\n");
+
+    //	Clock control (needed for PWM)
+	clk_base = peri_base + CLOCK_BASE_OFFSET;
+	clk_map = (uint32_t *)mmap(0, CLK_LEN, PROT_READ | PROT_WRITE, MAP_SHARED,
+														 mem_fd, clk_base);
+	if (clk_map == MAP_FAILED)	printf("mmap (CLK) failed\n");
+
+  return SETUP_OK;
 }
 
 void clear_event_detect(int gpio)
@@ -313,7 +350,18 @@ int input_gpio(int gpio)
    return value;
 }
 
-void cleanup(void)
-{
-    munmap((void *)gpio_map, BLOCK_SIZE);
+void cleanup(void) {
+  munmap((void *)gpio_map, BLOCK_SIZE);
+  if (pads_map)
+    munmap((void *)pads_map, PADS_LEN);
+  if (pwm_map)
+    munmap((void *)pwm_map, PWM_LEN);
+  if (pads_map)
+    munmap((void *)clk_map, CLK_LEN);
+}
+
+int getPAD(unsigned group) { return (*(pads_map + group + 11)) & 0x1f; }
+
+void setPAD(unsigned group, unsigned padstate) {
+  *(pads_map + group + 11) = BCM_PASSWORD | (padstate & 0x1f);
 }
