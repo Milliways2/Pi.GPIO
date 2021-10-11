@@ -22,4 +22,4 @@ SOFTWARE.
 
 from Pi._GPIO import *
 
-VERSION = '0.7.1'
+VERSION = '0.7.2'
