@@ -21,7 +21,7 @@ SOFTWARE.
 */
 /*
 Enhanced functionality by Ian Binnie (based RPi.GPIO 0.7.0 by Ben Croston)
-2021-09-02
+2021-10-13
 */
 
 #include "Python.h"
@@ -1279,11 +1279,13 @@ PyMethodDef rpi_gpio_methods[] = {
    {"pwm_setGpio", (PyCFunction)py_pwmSetGpio, METH_VARARGS | METH_KEYWORDS,
 		 "Put gpio pin into PWM mode\nchannel - either board pin number or BCM number depending on which mode is set."},
    {"pwm_setClock", (PyCFunction)py_pwmSetClock, METH_VARARGS | METH_KEYWORDS,
-		 "Set/Change the PWM clock\nBoth channels share a common clock, which is 19.2 MHz / divisor\ndivisor - 1-4095."},
+		 "Set/Change the PWM clock\nBoth channels share a common clock, which is Osc / divisor\n"
+		 "Osc is 19.2 MHz on most Pi models\nOsc is 54 MHz on BCM2711 used on Pi4\n"
+		 "divisor - 1-4095."},
    {"pwm_setRange", (PyCFunction)py_pwmSetRange, METH_VARARGS | METH_KEYWORDS,
    ("Determine Channel 0 or 1 from pin and set the range register in the PWM generator.\n"
 			"In Mark:Space mode the output is HIGH for Mark time slots and LOW for Range-Mark.\n"
-			"The output is thus a fixed frequency; PWM frequency = 19.2 MHz / (divisor * range)\n"
+			"The output is thus a fixed frequency; PWM frequency = PWM clock / range\n"
 			"Set initial duty cycle to 50%.")},
 		{"pwm_Write", (PyCFunction)py_pwmWrite, METH_VARARGS | METH_KEYWORDS,
 			"Sets the duty cycle  mark/range\nvalue - 0-RANGE."},
