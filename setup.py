@@ -31,7 +31,7 @@ classifiers = ['Development Status :: 5 - Production/Stable',
                'Topic :: System :: Hardware']
 
 setup(name             = 'Pi.GPIO',
-      version          = '0.7.2',
+      version          = '0.7.2.1',
       author           = 'Ian Binnie',
       author_email     = 'not available - contact Milliways on raspberrypi.stackexchange.com',
       description      = 'A module to control Raspberry Pi GPIO channels',

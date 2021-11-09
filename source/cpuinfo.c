@@ -21,8 +21,10 @@ SOFTWARE.
 */
 
 /* See the following for up to date information:
- * https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#new-style-revision-codes
+ * https://www.raspberrypi.org/documentation/hardware/raspberrypi/revision-codes/README.md (obsolete 2021-08-09)
+ * https://www.raspberrypi.org/documentation/computers/raspberry-pi.html#raspberry-pi-revision-codes
  */
+// 2021-10-30 Zero 2 W
 
 #include <stdio.h>
 #include <stdint.h>
@@ -99,8 +101,9 @@ int get_rpi_info(rpi_info *info)
             switch (revision[len-2]) {
                case '0': info->type = "Compute Module 3+"; info->p1_revision = 0; break;
                case '1': info->type = "Pi 4 Model B"; info->p1_revision = 3; break;
+               case '2': info->type = "Zero 2 W"; info->p1_revision = 3; break;
                case '3': info->type = "Pi 400"; info->p1_revision = 3; break;
-               case '4': info->type = "Compute Module 4"; info->p1_revision = 0; break;
+               case '4': info->type = "Compute Module 4"; info->p1_revision = 3; break;
                default : info->type = "Unknown"; info->p1_revision = 3; break;
             } break;
          default: info->type = "Unknown"; info->p1_revision = 3; break;
@@ -138,9 +141,7 @@ int get_rpi_info(rpi_info *info)
       info->processor = "Unknown";
       info->type = "Unknown";
       strcpy(info->revision, revision);
-// The following seems irrelevant as old scheme only used on pre Pi2 models
-//       uint64_t rev;
-//       sscanf(revision, "%llx", &rev);
+
       uint32_t rev;
       sscanf(revision, "%x", &rev);
       rev = rev & 0xefffffff;       // ignore preceeding 1000 for overvolt
@@ -251,22 +252,23 @@ int get_rpi_info(rpi_info *info)
 /*
 
 32 bits
+NEW           23: will be 1 for the new scheme, 0 for the old scheme
+MEMSIZE       20: 0=256M 1=512M 2=1G
+MANUFACTURER  16: 0=SONY 1=EGOMAN
+PROCESSOR     12: 0=2835 1=2836
+TYPE          04: 0=MODELA 1=MODELB 2=MODELA+ 3=MODELB+ 4=Pi2 MODEL B 5=ALPHA 6=CM
+REV           00: 0=REV0 1=REV1 2=REV2
 
-NOQuuuWuFMMMCCCCPPPPTTTTTTTTRRRR
+pi2 = 1<<23 | 2<<20 | 1<<12 | 4<<4 = 0xa01040
 
-Part     Represents   Options
-N        Overvoltage  0: Overvoltage allowed 1: Overvoltage disallowed
-O        OTP Program  0: OTP programming allowed 1: OTP programming disallowed
-Q        OTP Read     0: OTP reading allowed 1: OTP reading disallowed
-uuu      Unused       Unused
-W        Warranty bit 0: Warranty is intact 1: Warranty has been voided by overclocking
-u        Unused       Unused
-F        New flag     1: new-style revision 0: old-style revision
-MMM      Memory size  0: 256MB 1: 512MB 2: 1GB 3: 2GB 4: 4GB 5: 8GB
-CCCC     Manufacturer 0: Sony UK 1: Egoman 2: Embest 3: Sony Japan 4: Embest 5: Stadium
-PPPP     Processor    0: BCM2835 1: BCM2836 2: BCM2837 3: BCM2711
-TTTTTTTT Type         0: A 1: B 2: A+ 3: B+ 4: 2B 5: Alpha (early prototype) 6: CM1 8: 3B 9: Zero
-                      a: CM3 c: Zero W d: 3B+ e: 3A+ f: Internal use only 10: CM3+ 11: 4B 13: 400 14: CM4
-RRRR     Revision     0, 1, 2, etc.
+--------------------
+SRRR MMMM PPPP TTTT TTTT VVVV
+
+S scheme (0=old, 1=new)
+R RAM (0=256, 1=512, 2=1024)
+M manufacturer (0='SONY',1='EGOMAN',2='EMBEST',3='UNKNOWN',4='EMBEST')
+P processor (0=2835, 1=2836 2=2837)
+T type (0='A', 1='B', 2='A+', 3='B+', 4='Pi 2 B', 5='Alpha', 6='Compute Module')
+V revision (0-15)
 
 */

@@ -21,11 +21,6 @@ Based on WiringPi code
  ***********************************************************************
  */
 
-// PWM header
-
-// #define	PWM_MODE_MS	0
-// #define	PWM_MODE_BAL	1
-
 //	Word offsets into the PWM control region
 
 #define	PWM_CONTROL	0

@@ -22,7 +22,7 @@ SOFTWARE.
 /*
 Enhanced functionality by Ian Binnie (based on RPi.GPIO 0.7.0 by Ben Croston)
 Includes code inspired by pigpio & wiringpi
-2021-08-31
+2021-11-06
 */
 
 int setup(void);
@@ -41,7 +41,7 @@ void cleanup(void);
 int getPAD(unsigned group);
 void setPAD(unsigned group, unsigned padstate);
 
-extern int usingGpioMem;
+extern int piMemSetup;
 
 #define SETUP_OK           0
 #define SETUP_DEVMEM_FAIL  1

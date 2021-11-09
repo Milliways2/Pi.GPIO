@@ -76,14 +76,13 @@ static int mmap_gpio_mem(void)
 }
 
 static int check_dev_mem(void) {
-  // check /dev/mem
-  if (usingGpioMem) {
-    PyErr_SetString(PyExc_RuntimeError, "No access to /dev/mem.  Try running as root!");
+  if (!piMemSetup) {
+    PyErr_SetString(PyExc_RuntimeError,
+                    "No access to /dev/mem.  Try running as root!");
     return 2;
   }
   return 0;
 }
-
 
 // python function cleanup(channel=None)
 static PyObject *py_cleanup(PyObject *self, PyObject *args, PyObject *kwargs)
@@ -524,6 +523,7 @@ static PyObject *py_input_gpio(PyObject *self, PyObject *args)
    }
    return value;
 }
+
 // python function value = read_gpio(channel)
 static PyObject *py_read_gpio(PyObject *self, PyObject *args)
 {
@@ -1183,9 +1183,9 @@ static PyObject *py_pwmSetGpio(PyObject *self, PyObject *args) {
   if (mmap_gpio_mem())
     return NULL;
 
-  if (check_dev_mem())
-    return NULL;
-
+//   if (check_dev_mem())
+//     return NULL;
+//
   result = pwmSetGpio(gpio);
   if (result) {
     PyErr_SetString(PyExc_ValueError, "GPIO does not support PWM");
